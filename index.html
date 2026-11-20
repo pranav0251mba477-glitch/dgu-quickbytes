@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DGU QuickBytes &amp; Prints</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800"><div id="root"></div>
+<script type="text/babel">
+/* ====== CONFIG (edit these) ====== */
+const FIREBASE_CONFIG = null; // paste your Firebase web config object here. null = local demo mode (data stays in this browser)
+const ADMIN_EMAILS = ["pranav.0251mba477@dgu.ac.in"];
+const ALLOWED_DOMAIN = "dgu.ac.in";
+const UPI_ID = "quickbytes@upi", UPI_NAME = "DGU QuickBytes";
+const RATE = { bw: 2, color: 5 };
+const HOSTELS = ["Rajpur Road Hostel A", "Rajpur Road Hostel B", "Rajpur Road Hostel C"];
+/* ================================= */
+
+const { useState, useEffect, useMemo } = React;
+const useFb = !!FIREBASE_CONFIG;
+let fdb, fauth;
+if (useFb) { firebase.initializeApp(FIREBASE_CONFIG); fdb = firebase.firestore(); fauth = firebase.auth(); }
+const LS = c => JSON.parse(localStorage.getItem("qb_" + c) || "{}");
+const DB = {
+  watch(c, cb) {
+    if (useFb) return fdb.collection(c).onSnapshot(s => cb(s.docs.map(d => ({ ...d.data(), id: d.id }))));
+    const f = () => cb(Object.entries(LS(c)).map(([id, v]) => ({ ...v, id })));
+    window.addEventListener("qb:" + c, f); f();
+    return () => window.removeEventListener("qb:" + c, f);
+  },
+  async set(c, id, data) {
+    if (useFb) return fdb.collection(c).doc(id).set(data, { merge: true });
+    const o = LS(c); o[id] = { ...(o[id] || {}), ...data };
+    localStorage.setItem("qb_" + c, JSON.stringify(o)); window.dispatchEvent(new Event("qb:" + c));
+  },
+  async del(c, id) {
+    if (useFb) return fdb.collection(c).doc(id).delete();
+    const o = LS(c); delete o[id]; localStorage.setItem("qb_" + c, JSON.stringify(o)); window.dispatchEvent(new Event("qb:" + c));
+  }
+};
+function useCol(c) { const [d, setD] = useState([]); useEffect(() => DB.watch(c, setD), [c]); return d; }
+
+const MENU = [["chips","Lay's Chips","snack",20,15,40,"🥔"],["noodles","Maggi Noodles","snack",15,12,50,"🍜"],["cola","Cold Drink 250ml","snack",25,20,40,"🥤"],["biscuit","Biscuit Pack","snack",10,8,60,"🍪"],["energy","Energy Drink","snack",110,95,20,"⚡"],["choco","Chocolate Bar","snack",30,24,30,"🍫"],["coffee","Instant Coffee Cup","snack",20,14,40,"☕"],["notebook","Notebook","essential",60,45,25,"📓"],["pens","Pen Pack (5)","essential",30,22,30,"🖊️"],["hl","Highlighters","essential",25,18,20,"🖍️"],["cable","Charger Cable","essential",150,110,10,"🔌"],["sani","Hand Sanitizer","essential",35,28,20,"🧴"]];
+async function seed() {
+  for (const [id, name, cat, price, cost, stock, emoji] of MENU) await DB.set("menu", id, { name, cat, price, cost, stock, emoji });
+  const P = ["aarav", "diya", "kabir", "meera", "rohan", "sana"];
+  // [who, [item,qty,...], daysAgo, hour, deliveryMins, rating, print?]
+  const demo = [[0,["chips",2,"cola",1],1,22,18,5],[1,["noodles",1,"coffee",1],1,23,22,4],[0,["energy",1],2,0,16,5],[2,["notebook",1,"pens",1],2,21,27,3],[3,["chips",1,"biscuit",2],3,1,15,4,{file:"lab-report.pdf",pages:12,range:"All",mode:"bw",copies:1,price:24}],[0,["noodles",2],3,22,19,4],[4,["cable",1],4,21,31,2],[1,["choco",2,"cola",2],4,23,17,5],[5,["coffee",2,"biscuit",1],5,2,14,5],[2,["chips",1,"noodles",1],5,22,20,4]];
+  for (let i = 0; i < demo.length; i++) {
+    const [w, it, d, h, dm, r, print] = demo[i];
+    const items = []; for (let k = 0; k < it.length; k += 2) { const m = MENU.find(x => x[0] === it[k]); items.push({ id: m[0], name: m[1], price: m[3], cost: m[4], qty: it[k + 1] }); }
+    const t = new Date(Date.now() - d * 864e5).setHours(h, 10 + i * 3, 0, 0);
+    const total = items.reduce((s, l) => s + l.price * l.qty, 0) + (print ? print.price : 0);
+    await DB.set("orders", "DEMO" + (i + 1), { email: P[w] + ".demo@dgu.ac.in", name: P[w][0].toUpperCase() + P[w].slice(1), hostel: HOSTELS[i % 3], room: String(101 + i * 7), note: "", items, print: print || null, total, upiRef: "UPI" + (4820100 + i), status: "delivered", courier: "courier.demo@dgu.ac.in", rating: r, comment: r >= 4 ? "Quick and easy!" : "A bit slow tonight.", ts: { placed: t, accepted: t + 12e4, preparing: t + 3e5, out: t + 54e4, delivered: t + dm * 6e4 } });
+  }
+}
+if (!useFb && !localStorage.getItem("qb_menu")) seed();
+
+const fmt = n => "₹" + Math.round(n);
+const T = t => t ? new Date(t).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "-";
+const STEPS = ["placed", "accepted", "preparing", "out", "delivered"];
+const LABEL = { placed: "Placed", accepted: "Accepted", preparing: "Preparing", out: "Out for delivery", delivered: "Delivered" };
+const delMin = o => o.ts && o.ts.delivered ? (o.ts.delivered - o.ts.placed) / 6e4 : null;
+const orderCost = o => o.items.reduce((s, l) => s + l.cost * l.qty, 0) + (o.print ? o.print.price * 0.6 : 0);
+const isOpen = s => { const h = new Date().getHours(); return h >= 21 || h < 3 || !!(s && s.override); };
+const btn = "rounded-xl px-4 py-2 font-semibold active:scale-95 transition ";
+const B1 = btn + "bg-amber-400 text-blue-950", B2 = btn + "bg-blue-900 text-white", B3 = btn + "bg-slate-200 text-slate-700";
+const inp = "w-full border border-slate-300 rounded-xl px-3 py-2 bg-white";
+
+function Track({ o }) {
+  const i = STEPS.indexOf(o.status);
+  return <div className="flex gap-1 my-2">{STEPS.map((s, k) => <div key={s} className="flex-1 text-center">
+    <div className={"h-1.5 rounded " + (k <= i ? "bg-amber-500" : "bg-slate-200")} />
+    <div className={"text-[10px] mt-1 " + (k <= i ? "text-blue-900 font-semibold" : "text-slate-400")}>{LABEL[s]}</div></div>)}</div>;
+}
+function Stars({ v, set }) { return <span>{[1, 2, 3, 4, 5].map(n => <button key={n} onClick={() => set && set(n)} className={"text-2xl " + (n <= v ? "text-amber-500" : "text-slate-300")}>★</button>)}</span>; }
+
+/* ---------- LOGIN ---------- */
+function Login({ onLogin }) {
+  const [e, setE] = useState(""), [role, setRole] = useState("customer");
+  const go = async () => {
+    let mail = e.trim().toLowerCase();
+    if (useFb) { try { mail = (await fauth.signInWithPopup(new firebase.auth.GoogleAuthProvider())).user.email.toLowerCase(); } catch (x) { return alert(x.message); } }
+    const admin = ADMIN_EMAILS.includes(mail);
+    if (!admin && !mail.endsWith("@" + ALLOWED_DOMAIN)) return alert("Please use your @" + ALLOWED_DOMAIN + " email.");
+    if (role === "admin" && !admin) return alert("This email isn't on the admin list.");
+    onLogin({ email: mail, role });
+  };
+  return <div className="min-h-screen bg-blue-950 flex items-center justify-center p-5"><div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl">
+    <div className="text-4xl">🌙🍜🖨️</div>
+    <h1 className="text-2xl font-extrabold text-blue-900 mt-2">DGU QuickBytes &amp; Prints</h1>
+    <p className="text-slate-500 mb-4">Snacks, essentials and prints at your hostel door, 9 PM to 3 AM.</p>
+    <div className="flex gap-2 mb-3">{["customer", "courier", "admin"].map(r => <button key={r} onClick={() => setRole(r)} className={"flex-1 capitalize rounded-xl py-2 font-semibold " + (role === r ? "bg-blue-900 text-white" : "bg-slate-100")}>{r}</button>)}</div>
+    {!useFb && <input className={inp + " mb-3"} placeholder={"you@" + ALLOWED_DOMAIN} value={e} onChange={x => setE(x.target.value)} />}
+    <button className={B1 + " w-full"} onClick={go}>{useFb ? "Continue with Google" : "Log in"}</button>
+    {!useFb && <p className="text-xs text-slate-400 mt-3">Demo mode: data is saved in this browser only.</p>}
+  </div></div>;
+}
+
+/* ---------- CUSTOMER ---------- */
+function PrintCard({ onAdd }) {
+  const [f, setF] = useState(null), [pages, setPages] = useState(1), [range, setRange] = useState(""), [mode, setMode] = useState("bw"), [copies, setCopies] = useState(1), [err, setErr] = useState("");
+  const price = pages * copies * RATE[mode];
+  const pick = async e => {
+    const file = e.target.files[0]; if (!file) return; setErr("");
+    if (file.size > 600000) return setErr("File too big for the prototype (max 600 KB).");
+    const txt = new TextDecoder("latin1").decode(await file.arrayBuffer());
+    const c = (txt.match(/\/Type\s*\/Page[^s]/g) || []).length; if (c) setPages(c);
+    const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(file); });
+    setF({ name: file.name, data });
+  };
+  return <div className="bg-white rounded-2xl p-4 shadow-sm border-2 border-amber-300">
+    <div className="font-bold text-blue-900">🖨️ Print Order <span className="text-xs font-normal text-slate-500">₹{RATE.bw}/page B/W, ₹{RATE.color}/page colour</span></div>
+    <input type="file" accept="application/pdf" onChange={pick} className="mt-2 text-sm" />
+    {err && <div className="text-red-600 text-sm">{err}</div>}
+    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+      <label>Pages to print<input type="number" min="1" className={inp} value={pages} onChange={e => setPages(Math.max(1, +e.target.value))} /></label>
+      <label>Page range<input className={inp} placeholder="All, or 1-5" value={range} onChange={e => setRange(e.target.value)} /></label>
+      <label>Colour<select className={inp} value={mode} onChange={e => setMode(e.target.value)}><option value="bw">Black &amp; white</option><option value="color">Colour</option></select></label>
+      <label>Copies<input type="number" min="1" className={inp} value={copies} onChange={e => setCopies(Math.max(1, +e.target.value))} /></label>
+    </div>
+    <div className="flex items-center justify-between mt-3"><b className="text-lg">{fmt(price)}</b>
+      <button disabled={!f} className={B1 + " disabled:opacity-40"} onClick={() => { onAdd({ file: f.name, data: f.data, pages, range: range || "All", mode, copies, price }); setF(null); }}>Add print</button></div>
+  </div>;
+}
+
+function Customer({ me }) {
+  const menu = useCol("menu"), orders = useCol("orders"), sets = useCol("settings");
+  const open = isOpen(sets.find(s => s.id === "main"));
+  const [tab, setTab] = useState("menu"), [cart, setCart] = useState({}), [pr, setPr] = useState(null);
+  const [h, setH] = useState(HOSTELS[0]), [room, setRoom] = useState(""), [name, setName] = useState(""), [note, setNote] = useState(""), [ref, setRef] = useState("");
+  const mine = orders.filter(o => o.email === me).sort((a, b) => b.ts.placed - a.ts.placed);
+  const lines = menu.filter(m => cart[m.id]).map(m => ({ id: m.id, name: m.name, price: m.price, cost: m.cost, qty: cart[m.id] }));
+  const total = lines.reduce((s, l) => s + l.price * l.qty, 0) + (pr ? pr.price : 0);
+  const n = Object.values(cart).reduce((a, b) => a + b, 0) + (pr ? 1 : 0);
+  const add = (id, d) => setCart(c => { const x = { ...c }, q = Math.max(0, (c[id] || 0) + d); q ? x[id] = q : delete x[id]; return x; });
+  const reorder = o => { const c = {}; o.items.forEach(i => { if (menu.find(m => m.id === i.id && m.stock > 0)) c[i.id] = i.qty; }); setCart(c); setTab("cart"); };
+  const place = async () => {
+    if (!open) return alert("We're closed. Orders open 9 PM to 3 AM.");
+    if (!name || !room || ref.trim().length < 6) return alert("Add your name, room number and the UPI transaction reference.");
+    const id = "QB" + Date.now().toString(36).toUpperCase();
+    await DB.set("orders", id, { email: me, name, hostel: h, room, note, items: lines, print: pr, total, upiRef: ref.trim(), status: "placed", ts: { placed: Date.now() } });
+    for (const l of lines) { const m = menu.find(x => x.id === l.id); await DB.set("menu", l.id, { stock: Math.max(0, m.stock - l.qty) }); }
+    setCart({}); setPr(null); setRef(""); setTab("orders");
+  };
+  const rate = (o, r, c) => DB.set("orders", o.id, { rating: r, comment: c || "" });
+  const upi = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${total}&cu=INR`;
+  return <div className="pb-20">
+    {!open && <div className="bg-red-600 text-white text-center text-sm p-2">🌙 Service closed. We deliver 9 PM to 3 AM. Come back tonight!</div>}
+    <div className="p-4 space-y-3 max-w-xl mx-auto">
+      {tab === "menu" && <>
+        <PrintCard onAdd={p => { setPr(p); setTab("cart"); }} />
+        {["snack", "essential"].map(cat => <div key={cat}><h2 className="font-bold text-blue-900 capitalize mt-2 mb-1">{cat === "snack" ? "Snacks & drinks" : "Essentials"}</h2>
+          {menu.filter(m => m.cat === cat).map(m => <div key={m.id} className="bg-white rounded-2xl p-3 mb-2 flex items-center gap-3 shadow-sm">
+            <div className="text-3xl">{m.emoji}</div><div className="flex-1"><div className="font-semibold">{m.name}</div><div className="text-sm text-slate-500">{fmt(m.price)} · {m.stock > 0 ? m.stock + " left" : "Out of stock"}</div></div>
+            {cart[m.id] ? <div className="flex items-center gap-2"><button className={B3} onClick={() => add(m.id, -1)}>−</button><b>{cart[m.id]}</b><button className={B1} disabled={cart[m.id] >= m.stock} onClick={() => add(m.id, 1)}>+</button></div>
+              : <button className={B1 + " disabled:opacity-40"} disabled={m.stock < 1} onClick={() => add(m.id, 1)}>Add</button>}
+          </div>)}</div>)}
+      </>}
+      {tab === "cart" && (n === 0 ? <p className="text-center text-slate-500 mt-10">Your cart is empty. Grab a snack?</p> : <>
+        <div className="bg-white rounded-2xl p-4 shadow-sm">
+          {lines.map(l => <div key={l.id} className="flex justify-between py-1"><span>{l.name} × {l.qty}</span><b>{fmt(l.price * l.qty)}</b></div>)}
+          {pr && <div className="flex justify-between py-1"><span>🖨️ {pr.file} ({pr.pages}p, {pr.mode === "bw" ? "B/W" : "Colour"}, ×{pr.copies})</span><span><b>{fmt(pr.price)}</b> <button className="text-red-600 text-sm" onClick={() => setPr(null)}>remove</button></span></div>}
+          <div className="flex justify-between border-t mt-2 pt-2 text-lg"><b>Total</b><b>{fmt(total)}</b></div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 shadow-sm space-y-2">
+          <input className={inp} placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
+          <select className={inp} value={h} onChange={e => setH(e.target.value)}>{HOSTELS.map(x => <option key={x}>{x}</option>)}</select>
+          <input className={inp} placeholder="Room number" value={room} onChange={e => setRoom(e.target.value)} />
+          <input className={inp} placeholder="Note (optional): e.g. call when you arrive" value={note} onChange={e => setNote(e.target.value)} />
+        </div>
+        <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+          <div className="font-semibold">Pay {fmt(total)} by UPI</div>
+          <img className="mx-auto my-2" width="160" height="160" alt="UPI QR" src={"https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" + encodeURIComponent(upi)} />
+          <div className="text-sm text-slate-500 mb-2">UPI ID: <b>{UPI_ID}</b></div>
+          <a href={upi} className="text-blue-700 underline text-sm">Open UPI app</a>
+          <input className={inp + " mt-3"} placeholder="UPI transaction reference" value={ref} onChange={e => setRef(e.target.value)} />
+        </div>
+        <button className={B1 + " w-full text-lg"} onClick={place}>Place order · {fmt(total)}</button>
+      </>)}
+      {tab === "orders" && (mine.length === 0 ? <p className="text-center text-slate-500 mt-10">No orders yet. Your first one's on us to deliver fast.</p> : mine.map(o => <div key={o.id} className="bg-white rounded-2xl p-4 shadow-sm">
+        <div className="flex justify-between"><b>#{o.id}</b><span className="text-sm text-slate-500">{T(o.ts.placed)}</span></div>
+        <Track o={o} />
+        <div className="text-sm">{o.items.map(i => i.name + " ×" + i.qty).join(", ")}{o.print ? (o.items.length ? ", " : "") + "Print: " + o.print.file : ""}</div>
+        <div className="flex justify-between mt-1"><b>{fmt(o.total)}</b><span className="text-sm text-slate-500">{o.hostel}, Rm {o.room}</span></div>
+        {o.status === "delivered" && (o.rating ? <div className="mt-2"><Stars v={o.rating} />{o.comment && <div className="text-sm text-slate-500">"{o.comment}"</div>}</div>
+          : <RateBox onSave={(r, c) => rate(o, r, c)} />)}
+        {o.items.length > 0 && <button className={B2 + " mt-2 text-sm"} onClick={() => reorder(o)}>Reorder</button>}
+      </div>))}
+    </div>
+    <nav className="fixed bottom-0 inset-x-0 bg-white border-t flex">{[["menu", "🍿 Menu"], ["cart", "🛒 Cart" + (n ? " (" + n + ")" : "")], ["orders", "📦 Orders"]].map(([k, l]) =>
+      <button key={k} onClick={() => setTab(k)} className={"flex-1 py-3 font-semibold " + (tab === k ? "text-blue-900 border-t-4 border-amber-400" : "text-slate-400")}>{l}</button>)}</nav>
+  </div>;
+}
+function RateBox({ onSave }) {
+  const [r, setR] = useState(0), [c, setC] = useState("");
+  return <div className="mt-2 bg-amber-50 rounded-xl p-2"><div className="text-sm font-semibold">How was it?</div><Stars v={r} set={setR} />
+    <input className={inp + " mb-2"} placeholder="Comment (optional)" value={c} onChange={e => setC(e.target.value)} />
+    <button disabled={!r} className={B1 + " disabled:opacity-40 text-sm"} onClick={() => onSave(r, c)}>Submit rating</button></div>;
+}
+
+/* ---------- COURIER ---------- */
+function Courier({ me }) {
+  const orders = useCol("orders"), users = useCol("users");
+  const on = !!(users.find(x => x.id === me) || {}).online;
+  const NEXT = { placed: ["accepted", "Accept order"], accepted: ["preparing", "Start preparing"], preparing: ["out", "Picked up"], out: ["delivered", "Mark delivered"] };
+  const avail = orders.filter(o => o.status === "placed").sort((a, b) => a.ts.placed - b.ts.placed);
+  const mine = orders.filter(o => o.courier === me && o.status !== "delivered");
+  const adv = o => { const [s] = NEXT[o.status]; DB.set("orders", o.id, { status: s, courier: me, ts: { ...o.ts, [s]: Date.now() } }); };
+  const Card = o => <div key={o.id} className="bg-white rounded-2xl p-4 shadow-sm">
+    <div className="flex justify-between"><b>#{o.id}</b><span className="text-sm">{LABEL[o.status]}</span></div>
+    <div className="text-sm text-slate-600">{o.hostel} · Room <b>{o.room}</b> · {o.name}</div>
+    <div className="text-sm mt-1">{o.items.map(i => i.name + " ×" + i.qty).join(", ")}</div>
+    {o.print && <div className="text-sm mt-1">🖨️ {o.print.pages}p {o.print.mode === "bw" ? "B/W" : "Colour"} ×{o.print.copies} (range: {o.print.range}) {o.print.data && <a className="text-blue-700 underline" download={o.print.file} href={o.print.data}>download PDF</a>}</div>}
+    {o.note && <div className="text-sm italic text-slate-500">Note: {o.note}</div>}
+    <button className={B1 + " w-full mt-2"} onClick={() => adv(o)}>{NEXT[o.status][1]}</button></div>;
+  return <div className="p-4 max-w-xl mx-auto space-y-3">
+    <button onClick={() => DB.set("users", me, { online: !on, role: "courier" })} className={"w-full text-lg " + (on ? B2 : B3)}>{on ? "🟢 You're online (tap to go offline)" : "⚪ You're offline (tap to go online)"}</button>
+    <h2 className="font-bold text-blue-900">My deliveries</h2>{mine.length ? mine.map(Card) : <p className="text-slate-500 text-sm">Nothing in progress.</p>}
+    <h2 className="font-bold text-blue-900">Available orders</h2>
+    {!on ? <p className="text-slate-500 text-sm">Go online to see new orders.</p> : avail.length ? avail.map(Card) : <p className="text-slate-500 text-sm">No new orders right now.</p>}
+  </div>;
+}
+
+/* ---------- ADMIN ---------- */
+function Admin() {
+  const orders = useCol("orders"), menu = useCol("menu"), sets = useCol("settings");
+  const ov = !!(sets.find(s => s.id === "main") || {}).override;
+  const [tab, setTab] = useState("metrics"), [fd, setFd] = useState(""), [fs, setFs] = useState(""), [fh, setFh] = useState("");
+  const [fixed, setFixed] = useState(5000), [target, setTarget] = useState(200);
+  const list = orders.filter(o => (!fs || o.status === fs) && (!fh || o.hostel === fh) && (!fd || new Date(o.ts.placed).toLocaleDateString("en-CA") === fd)).sort((a, b) => b.ts.placed - a.ts.placed);
+  const M = useMemo(() => {
+    const cust = {}; orders.forEach(o => cust[o.email] = (cust[o.email] || 0) + 1);
+    const nc = Object.keys(cust).length, rep = Object.values(cust).filter(v => v > 1).length;
+    const dl = orders.map(delMin).filter(x => x !== null), rt = orders.filter(o => o.rating);
+    const hrs = [21, 22, 23, 0, 1, 2].map(h => ({ h, n: orders.filter(o => new Date(o.ts.placed).getHours() === h).length }));
+    const tot = orders.reduce((s, o) => s + o.total, 0), cost = orders.reduce((s, o) => s + orderCost(o), 0), k = orders.length || 1;
+    return { n: orders.length, nc, rep: nc ? rep / nc * 100 : 0, aov: tot / k, avgDel: dl.length ? dl.reduce((a, b) => a + b, 0) / dl.length : 0,
+      in20: dl.length ? dl.filter(x => x <= 20).length / dl.length * 100 : 0, rating: rt.length ? rt.reduce((s, o) => s + o.rating, 0) / rt.length : 0, hrs, price: tot / k, vc: cost / k };
+  }, [orders]);
+  const contrib = M.price - M.vc, be = contrib > 0 ? Math.ceil(fixed / contrib) : 0;
+  const csv = () => {
+    const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+    const rows = [["order_id", "placed_at", "email", "name", "hostel", "room", "items", "print", "total_inr", "upi_ref", "status", "courier", "delivery_min", "rating"],
+      ...orders.map(o => [o.id, new Date(o.ts.placed).toISOString(), o.email, o.name, o.hostel, o.room, o.items.map(i => i.name + "x" + i.qty).join("; "), o.print ? o.print.file + " " + o.print.pages + "p" : "", o.total, o.upiRef, o.status, o.courier || "", delMin(o) ? delMin(o).toFixed(1) : "", o.rating || ""])];
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([rows.map(r => r.map(q).join(",")).join("\n")], { type: "text/csv" })); a.download = "quickbytes_orders.csv"; a.click();
+  };
+  const Stat = ({ l, v, sub }) => <div className="bg-white rounded-2xl p-3 shadow-sm"><div className="text-xs text-slate-500">{l}</div><div className="text-2xl font-extrabold text-blue-900">{v}</div>{sub && <div className="text-xs text-slate-400">{sub}</div>}</div>;
+  const Goal = ({ l, v, g, unit = "" }) => <div className="mb-2"><div className="flex justify-between text-sm"><span>{l}</span><b>{Math.round(v)}{unit} / {g}{unit}</b></div><div className="h-2 bg-slate-200 rounded"><div className="h-2 bg-amber-500 rounded" style={{ width: Math.min(100, v / g * 100) + "%" }} /></div></div>;
+  const mx = Math.max(1, ...M.hrs.map(x => x.n));
+  return <div className="p-4 max-w-4xl mx-auto">
+    <div className="flex gap-2 mb-3 flex-wrap">{["metrics", "orders", "menu"].map(t => <button key={t} onClick={() => setTab(t)} className={"capitalize " + (tab === t ? B2 : B3)}>{t}</button>)}
+      <button className={B1} onClick={csv}>Export CSV</button>
+      <label className="flex items-center gap-1 text-sm ml-auto"><input type="checkbox" checked={ov} onChange={() => DB.set("settings", "main", { override: !ov })} /> Test mode (ignore 9 PM–3 AM)</label></div>
+    {tab === "metrics" && <div className="space-y-3">
+      {useFb && !menu.length && <button className={B1} onClick={seed}>Load demo data</button>}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Stat l="Total orders" v={M.n} /><Stat l="Paying customers" v={M.nc} /><Stat l="Repeat customers" v={M.rep.toFixed(0) + "%"} /><Stat l="Avg order value" v={fmt(M.aov)} />
+        <Stat l="Avg delivery time" v={M.avgDel.toFixed(1) + " min"} /><Stat l="Within 20 min" v={M.in20.toFixed(0) + "%"} /><Stat l="Avg rating" v={M.rating.toFixed(1) + " ★"} />
+      </div>
+      <div className="bg-white rounded-2xl p-4 shadow-sm"><h3 className="font-bold mb-2">Pilot goals</h3>
+        <Goal l="Paying customers" v={M.nc} g={25} /><Goal l="Completed orders" v={M.n} g={100} /><Goal l="Repeat customers" v={M.rep} g={20} unit="%" /><Goal l="Delivered within 20 min" v={M.in20} g={90} unit="%" /></div>
+      <div className="bg-white rounded-2xl p-4 shadow-sm"><h3 className="font-bold mb-2">Orders by hour</h3>
+        <div className="flex items-end gap-2 h-28">{M.hrs.map(x => <div key={x.h} className="flex-1 text-center"><div className="text-xs">{x.n}</div><div className="bg-blue-900 rounded-t" style={{ height: x.n / mx * 80 + 2 }} /><div className="text-xs text-slate-500">{x.h === 0 ? "12 AM" : x.h > 12 ? x.h - 12 + " PM" : x.h + (x.h === 12 ? " PM" : " AM")}</div></div>)}</div></div>
+      <div className="bg-white rounded-2xl p-4 shadow-sm"><h3 className="font-bold mb-2">Unit economics (per order, from your data)</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+          <div>Selling price<br /><b>{fmt(M.price)}</b></div><div>Variable cost<br /><b>{fmt(M.vc)}</b></div><div>Contribution<br /><b>{fmt(contrib)}</b></div>
+          <label>Fixed cost / month<input type="number" className={inp} value={fixed} onChange={e => setFixed(+e.target.value)} /></label>
+          <div>Break-even (from data)<br /><b>{be} units</b></div><label>Break-even target<input type="number" className={inp} value={target} onChange={e => setTarget(+e.target.value)} /></label></div>
+        <div className="mt-3"><Goal l="Orders vs break-even target" v={M.n} g={target} /></div></div>
+    </div>}
+    {tab === "orders" && <div>
+      <div className="flex gap-2 mb-2 flex-wrap"><input type="date" className={inp + " !w-auto"} value={fd} onChange={e => setFd(e.target.value)} />
+        <select className={inp + " !w-auto"} value={fs} onChange={e => setFs(e.target.value)}><option value="">All statuses</option>{STEPS.map(s => <option key={s} value={s}>{LABEL[s]}</option>)}</select>
+        <select className={inp + " !w-auto"} value={fh} onChange={e => setFh(e.target.value)}><option value="">All hostels</option>{HOSTELS.map(h => <option key={h}>{h}</option>)}</select></div>
+      <div className="overflow-x-auto bg-white rounded-2xl shadow-sm"><table className="w-full text-sm"><thead className="bg-slate-100 text-left"><tr>{["ID", "Time", "Customer", "Hostel / Room", "Total", "UPI ref", "Status", "Min", "★"].map(h => <th key={h} className="p-2">{h}</th>)}</tr></thead>
+        <tbody>{list.map(o => <tr key={o.id} className="border-t"><td className="p-2">{o.id}</td><td className="p-2">{T(o.ts.placed)}</td><td className="p-2">{o.name}<div className="text-xs text-slate-400">{o.email}</div></td><td className="p-2">{o.hostel}, {o.room}</td><td className="p-2">{fmt(o.total)}</td><td className="p-2">{o.upiRef}</td>
+          <td className="p-2"><select value={o.status} onChange={e => DB.set("orders", o.id, { status: e.target.value, ts: { ...o.ts, [e.target.value]: o.ts[e.target.value] || Date.now() } })}>{STEPS.map(s => <option key={s} value={s}>{LABEL[s]}</option>)}</select></td>
+          <td className="p-2">{delMin(o) ? delMin(o).toFixed(0) : "-"}</td><td className="p-2">{o.rating || "-"}</td></tr>)}</tbody></table>
+        {!list.length && <p className="p-4 text-slate-500">No orders match these filters.</p>}</div></div>}
+    {tab === "menu" && <div className="space-y-2">
+      {menu.map(m => <div key={m.id} className="bg-white rounded-2xl p-3 shadow-sm grid grid-cols-5 gap-2 items-center text-sm">
+        <input className={inp + " col-span-2"} defaultValue={m.name} onBlur={e => DB.set("menu", m.id, { name: e.target.value })} />
+        {[["price", "Price"], ["cost", "Cost"], ["stock", "Stock"]].map(([k, l]) => <label key={k} className="text-xs">{l}<input type="number" className={inp} defaultValue={m[k]} onBlur={e => DB.set("menu", m.id, { [k]: +e.target.value })} /></label>)}</div>)}
+      <button className={B1} onClick={() => DB.set("menu", "item" + Date.now(), { name: "New item", cat: "snack", price: 10, cost: 7, stock: 20, emoji: "🛍️" })}>+ Add item</button></div>}
+  </div>;
+}
+
+/* ---------- APP ---------- */
+function App() {
+  const [s, setS] = useState(() => JSON.parse(localStorage.getItem("qb_sess") || "null"));
+  const login = x => { localStorage.setItem("qb_sess", JSON.stringify(x)); setS(x); };
+  const logout = () => { localStorage.removeItem("qb_sess"); if (useFb) fauth.signOut(); setS(null); };
+  if (!s) return <Login onLogin={login} />;
+  return <div className="min-h-screen">
+    <header className="bg-blue-900 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div><div className="font-extrabold">🌙 QuickBytes <span className="text-amber-400">&amp; Prints</span></div><div className="text-xs text-blue-200">{s.role} · {s.email}</div></div>
+      <button onClick={logout} className="text-sm bg-blue-800 rounded-lg px-3 py-1">Log out</button></header>
+    {s.role === "customer" ? <Customer me={s.email} /> : s.role === "courier" ? <Courier me={s.email} /> : <Admin />}
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script></body></html>
